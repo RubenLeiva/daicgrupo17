@@ -3,190 +3,144 @@
 ## Tabla de Contenidos
 
 * [Sobre el proyecto](#sobre-el-proyecto)
-  * [Hecho con](#hecho-con)
 * [Documentación](#documentación)
 * [Contribuidores](#contribuidores)
-* [Créditos](#creditos)
-
 
 <!-- ABOUT THE PROJECT -->
 ## Sobre el proyecto
 
-ePresence es un sistema IoT para gestionar las aulas de cualquier centro de estudios. Consiste en saber cuántas personas entran, permanecen y salen del aula a tiempo real, así sabremos si una clase está ocupada o libre. Mediante un semáforo led sabremos si la clase está abierta (verde), ocupada (amarillo) o cerrada (rojo). Para saber si una clase esta cerrada bastará con saber si está fuera del horario establecido a ese aula.
+Safe Seats es un sistema IoT para evitar aglomeraciones en bares y restaurantes y mantener constantemente la distancia de seguridad entre las sillas. Para esto las sillas llevan incorporado un dispositivo el cual cuando detecta una silla a un metro o menos distancia se apaga la luz incorporada en el dispositivo. En caso de no haber hecho caso a la luz y lleves más de 10 segundos a menos de un metro de distancia, el motor de vibración incorporado se activará por lo que la silla comenzará a vibrar para que el comensal se dé cuenta de que está inflingiendo las medidas de seguridad.
 
-
-### Hecho con
-* [DjangoRest](https://www.django-rest-framework.org/) - Serverside
-* [Grove Base Hat for Raspberry Pi](http://wiki.seeedstudio.com/Grove_Base_Hat_for_Raspberry_Pi/) - Hardware
-* [Raspberry Pi 3 Model B](https://www.raspberrypi.org/products/raspberry-pi-3-model-b/) - Hardware
 
 <!-- GETTING STARTED -->
 ## Documentación
 
-### Server
+### Base de datos
+Para la base de Datos hemos utilizado Corlysis, necesitas añadir los argumentos db y token las declararemos en la cmd cuando ejecutemos el programa. Nuestra db es Safe Seats y el token es la secuencia de números y letras que te da Corlysis. Creamos una línea que va a ser nuestro Query que medimos la distancia que recoge el ultrasonido.
 
-El backend del servidor web, que tambien esta corriendo en la Raspberry, aunque no es la decisión más óptima. Lo hemos desarrollado con Django todo ello en Python. El servidor unicamente se encarga de recibir los datos y guardarlos en la base de datos, así como mostrarlos en un web para la comodidad de los usuarios.
+```parser = argparse.ArgumentParser()
+    parser.add_argument("db", help="database name")
+    parser.add_argument("token", help="secret token")
+    args = parser.parse_args()
+    
+    corlysis_params = {"db": args.db, "u": "token", "p": args.token, "precision": "ms"}
+    
+    payload = ""
+    counter = 1
+    problem_counter = 0        
 
-Bueno dando por sabidos los conocimientos básicos de Django, hemos creado las 3 views necesarias para la web, es decir el *Login*, *Home* y *Aula*. Las cuales cargan los datos respectivos a cada una. Por otro lado con [DJango RestFrameWork](https://www.django-rest-framework.org/), nos crea las urls necesarias para cada aula, en las que nos devolvera un JSON con todos los datos del aula elegida.
 
-```python
-def login(request):
-    return render(request, 'login.html')
-
-def home(request):
-	aulas = Aula.objects.all()
-	return render(request, 'home.html', {'aulas': aulas})
-
-def aula(request, id):
-	aula = Aula.objects.get(id=id)
-	return render(request, 'aula.html', {'aula': aula})
+    print('Detecting distance...')
+    while True:
+        unix_time_ms = int(time.time()*1000)
+        line = "Distance,dist=" + str(sonar.get_distance())+ " hora="  + str(unix_time_ms) + "\n"
+        print(line)
+        payload += line
+        
+        if counter % SENDING_PERIOD == 0 or counter % SENDING_PERIOD != 0:
+            try:
+                r = requests.post(URL, params=corlysis_params, data = payload)
+                if r.status_code == 204:
+                    print("writing")
+                else:
+                    #print(r.content)
+                    raise Exception("data not written")
+                payload = ""
+            except Eception as e:
+                #print(e)
+                problem_counter += 1
+                #print(sys.exc_info()[0])
+                print('cannot write')
+                if problem_counter == MAX_LINES_HISTORY:
+                    problem_counter = 0
+                    payload = ""
+        counter += 1
+        time_diff_ms = int(time.time()*1000) - unix_time_ms           
+        print(time_diff_ms)
+        if time_diff_ms < READING_DATA_PERIOD_MS:
+           time.sleep((READING_DATA_PERIOD_MS - time_diff_ms)/1000.0)
+        
 ```
-
-Hemos creado 5 Views especiales para gestionar los datos, entre ellas *aulaAdd* y *aulaRemove* para añadir y quitar una persona respectivamente de las aulas y los metodos *aulaVerde*, *aulaAmarillo* y *aulaRojo* para cambiar entre estados de las aulas. En las 5 VIews hay que añadir un slash y el numero del aula, para que elegir el aula.
-
-```python
-def aula_p_add(request, id):
-	aula = Aula.objects.get(id=id)
-	aula.personas = aula.personas+1
-	aula.save()
-	return HttpResponse('ok')
-
-def aula_p_remove(request, id):
-	aula = Aula.objects.get(id=id)
-	aula.personas = aula.personas-1
-	aula.save()
-	return HttpResponse('ok')
-
-def aula_e_verde(request, id):
-	aula = Aula.objects.get(id=id)
-	aula.estado = 0
-	aula.save()
-	return HttpResponse('ok')
-
-def aula_e_rojo(request, id):
-	aula = Aula.objects.get(id=id)
-	aula.estado = 2
-	aula.save()
-	return HttpResponse('ok')
-
-def aula_e_amarillo(request, id):
-	aula = Aula.objects.get(id=id)
-	aula.estado = 1
-	aula.save()
-	return HttpResponse('ok')
-
-```
-
 ### IoT
 
-En cuanto al hardware, hemos utilizado una Raspberry Pi 3 junto con una Grove Base Hat que nos permite añadir varios componentes como tres LED Sockets que hemos utilizado para hacer un semáforo y dos botones que hemos utilizado para sumar y restar en el contador de personas.
+En cuanto al hardware, hemos utilizado una Raspberry Pi 3 junto con una Grove Base Hat que nos permite añadir varios componentes como dos LED que hemos utilizado para advertir al consumidor si está manteniendo la distancia de seguridad o no, dos ultrasonidos para medir contantemente la distancia y un motor de vibración y un buzzer para volver a avisar en caso de que no hayan hecho caso a la primera advertencia.
 
-Para hacer uso de los componentes así como desarrollar sus funcionalidades, hemos creado la clase mainController en lenguaje python donde hemos desarrollado todo el código para poder hacer uso del hardware. 
+Para hacer uso de los componentes así como desarrollar sus funcionalidades, hemos creado la clase grove_ultrasonic_ranger.py en lenguaje python donde hemos desarrollado todo el código para poder hacer uso del hardware. 
 
-Hemos inicializado 3 leds uno para cada color del semáforo (ledV, ledA y ledR) donde asignaremos el número de puerto al que está concectado en la Raspberry Pi.
-
-```python
-ledV = GroveLed(5)
-ledA = GroveLed(16)
-ledR = GroveLed(18)
-```
-
-También hemos inicializado los 2 botones, uno tiene el método de añadir una persona y el otro de restar una persona
+Hemos importado el Led y el motor de vibración para esta Raspberry Pi.
 
 ```python
-btn_in = GroveButton(22)
-btn_out = GroveButton(24)
-
-def on_press_in(t):
-	aula_add()
-
-def on_press_out(t):
-	aula_remove()
-
-btn_in.on_press = on_press_in
-btn_out.on_press = on_press_out
+import motor
+import led
 ```
-
-El probrama principal se basa en un bucle de los métodos check() y update() que explicaremos a continuación.
-
+Hemos asignado el LED al puerto 22 que es donde lo conectaremos en el HAT. Con el método Write() haremosque la luz se encienda o se apague.
+Hemos hecho lo mismo para el motor.
 ```python
-#Main Program
-while True:
-	check()
-	update()
-```
+led =    GPIO(22, GPIO.OUT)
 
-El método check() comprueba constantemente mediante una petición a la URL del aula. Para definir en que estado debe estar el aula debemos comprobar en primer lugar si estamos dentro del horario, para ello hemos creado 3 variables de tiempo : la hora de entrada (h_in), la hora de salida (h_out) y la hora actual (h_act). De esta manera, sabremos si la hora actual está dentro o fuera del horario establecido a ese aula.
+def encenderL():
+    print("LED encendido")
+    led.write(0)
+    
+    
+def apagarL():
+    print("LED apagado")
+    led.write(1)
+```    
 
-```python
-def check():
-	res = requests.get('http://localhost:8000/api/Aula/1/')
-	testJson = json.loads(res.text)
-	global estado
-	if estado!=testJson['estado']:
-		estado = testJson['estado']
+El programa principal se basa en estar midiendo constantemente la distancia. El sensor calcula el tiempo que tarda las ondas en ir, rebotar con el objeto y volver el sensor calcula la distancia en base al tiempo que han tardado estas ondas en hacer el recorrido. Si tarda mucho tiempo el sensor omitirán los datos.
 
-	h_in = datetime.strptime(testJson['hora_in'],'%H:%M:%S').time()
-	h_out = datetime.strptime(testJson['hora_out'],'%H:%M:%S').time()
-	h_act = datetime.now().time()
+```  
+def __init__(self, pin):
+        self.dio = GPIO(pin)
 
-	if h_out > h_in:
-		if h_act > h_in and h_act < h_out:
-			if testJson['personas']==0:
-				aula_estado(0)
-			else:
-				aula_estado(1)
-		else:
-			aula_estado(2)
-	else:
-		if h_act > h_in or h_act < h_out:
-			if testJson['personas']==0:
-				aula_estado(0)
-			else:
-				aula_estado(1)
-		else:
-			aula_estado(2)
-```
-Las condiciones que hemos creado para establecer el estado del aula son: si la hora actual está dentro del horario y el número de personas que hay dentro es 0, el estado será aula_estado(0); si dentro del horario hubiese alguna persona sería aula_estado(1); si no se cumple ninguna de estas condiciones el estado será aula_estado(2).
+    def _get_distance(self):
+        self.dio.dir(GPIO.OUT)
+        self.dio.write(0)
+        usleep(2)
+        self.dio.write(1)
+        usleep(10)
+        self.dio.write(0)
 
-Los diferentes casos para aula_estado() son los siguientes:
+        self.dio.dir(GPIO.IN)
 
-```python
-def aula_estado(st):
-	if st==0:
-		requests.get('http://localhost:8000/aulaVerde/1/')
-	elif st==1:
-		requests.get('http://localhost:8000/aulaAmarillo/1/')
-	elif st==2:
-		requests.get('http://localhost:8000/aulaRojo/1/')
+        t0 = time.time()
+        count = 0
+        while count < _TIMEOUT1:
+            if self.dio.read():
+                break
+            count += 1
+        if count >= _TIMEOUT1:
+            return None
 
-```
-Donde aula_estado(0) sería para el verde, aula_estado(1) para el amarillo y aula_estado(2) para el rojo.
+        t1 = time.time()
+        count = 0
+        while count < _TIMEOUT2:
+            if not self.dio.read():
+                break
+            count += 1
+        if count >= _TIMEOUT2:
+            return None
 
-En cuanto al método update(), actualiza constantemente el estado de los leds comprobando el estado del aula ( aula_estado() ) y dependiendo del estado del aula enciende su led correspondiente.
+        t2 = time.time()
 
-```python
-def update():
-	global estado
-	if estado == 0:
-		ledV.on()
-		ledA.off()
-		ledR.off()
-		#abrir puerta
-	elif estado == 1:
-		ledV.off()
-		ledA.on()
-		ledR.off()
-		#abrir puerta
-	elif estado == 2:
-		ledV.off()
-		ledA.off()
-		ledR.on()
-		#bloquear puerta
-```
+        dt = int((t1 - t0) * 1000000)
+        if dt > 530:
+            return None
+
+        distance = ((t2 - t1) * 1000000 / 29 / 2)    # cm
+
+        return distance
+
+    def get_distance(self):
+        while True:
+            dist = self._get_distance()
+            if dist:
+                return dist
+```  
 
 <!-- CONTRIBUTORS -->
 ## Contribuidores
 
-* **Alberto Miranda**	-	*alberto.miranda@opendeusto.es*	-	[@AlbertoMGV](https://github.com/AlbertoMGV)
-* **Iñigo de Mingo**	-	*inigo.demingo@opendeusto.es*	-	[@InigodeMingo](https://github.com/InigodeMingo)
+* **Erik Saenz de Ugarte**	-	*erik.saenzdeugarte@opendeusto.es*
+* **Ruben Leiva**	-	*ruben.leiva@opendeusto.es*	
