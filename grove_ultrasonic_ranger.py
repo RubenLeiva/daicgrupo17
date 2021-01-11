@@ -41,7 +41,7 @@ import requests
 import argparse
 from grove.gpio import GPIO
 
-URL = 'https://corlysis.com:8086/write?db=Safe_Seats'
+URL = 'https://corlysis.com:8086/write'
 READING_DATA_PERIOD_MS = 2000.0
 SENDING_PERIOD = 2
 MAX_LINES_HISTORY = 1000
@@ -124,20 +124,23 @@ def main():
     print('Detecting distance...')
     while True:
         unix_time_ms = int(time.time()*1000)
-        line = "Distance to closest entity = {} {}\n".format(str(sonar.get_distance()), unix_time_ms)
+        line = "Distance,dist=" + str(sonar.get_distance())+ " hora="  + str(unix_time_ms) + "\n"
         print(line)
         payload += line
         
         if counter % SENDING_PERIOD == 0 or counter % SENDING_PERIOD != 0:
             try:
-                r = requests.posts(URL, params=corlysis_params, data = payload)
+                r = requests.post(URL, params=corlysis_params, data = payload)
                 if r.status_code == 204:
                     print("writing")
                 else:
+                    #print(r.content)
                     raise Exception("data not written")
                 payload = ""
-            except:
+            except Eception as e:
+                #print(e)
                 problem_counter += 1
+                #print(sys.exc_info()[0])
                 print('cannot write')
                 if problem_counter == MAX_LINES_HISTORY:
                     problem_counter = 0
